@@ -1,0 +1,7 @@
+tensorflow
+numpy<2
+pillow
+matplotlib
+requests
+opencv-python-headless==4.8.1.78
+mediapipe
