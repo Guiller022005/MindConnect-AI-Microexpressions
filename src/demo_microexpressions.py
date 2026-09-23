@@ -154,24 +154,23 @@ def generate_landmark_dataset_for_emotions(num_samples=4200):
                 coords[idx*3+1] += np.random.uniform(0.04, 0.12)
             coords[55*3] += np.random.uniform(0.02, 0.06)
             coords[285*3] -= np.random.uniform(0.02, 0.06)
-            # En el 50% de las muestras de ira, incorporar apertura de boca/grito (AU25/26 + AU4)
             if np.random.rand() > 0.5:
                 for idx in jaw:
                     coords[idx*3+1] += np.random.uniform(0.10, 0.35)
-                coords[61*3] -= np.random.uniform(0.02, 0.06)
-                coords[291*3] += np.random.uniform(0.02, 0.06)
 
-        elif emotion_id == 1: # Asco (Disgust - AU 9: Nariz y labio sup suben -Y)
-            for idx in nose:
-                coords[idx*3+1] -= np.random.uniform(0.03, 0.07)
+        elif emotion_id == 1: # Asco (Disgust - AU 9/10: Nariz y labio sup suben marcadamente -Y)
             for idx in upper_lip:
-                coords[idx*3+1] -= np.random.uniform(0.03, 0.07)
+                coords[idx*3+1] -= np.random.uniform(0.08, 0.16)
+            for idx in nose:
+                coords[idx*3+1] -= np.random.uniform(0.05, 0.10)
 
-        elif emotion_id == 2: # Miedo (Fear - AU 1+2+5: Cejas y párpados suben -Y)
-            for idx in brows:
-                coords[idx*3+1] -= np.random.uniform(0.04, 0.08)
+        elif emotion_id == 2: # Miedo (Fear - AU 1+2+4+5: Cejas int suben MUCHO -Y hacia frente y se juntan X)
+            for idx in inner_brows:
+                coords[idx*3+1] -= np.random.uniform(0.12, 0.22)
+            coords[55*3] += np.random.uniform(0.02, 0.05)
+            coords[285*3] -= np.random.uniform(0.02, 0.05)
             for idx in eyes_upper:
-                coords[idx*3+1] -= np.random.uniform(0.02, 0.05)
+                coords[idx*3+1] -= np.random.uniform(0.03, 0.07)
 
         elif emotion_id == 3: # Alegría (Happy - AU 12: Comisuras labiales suben -Y y abren X)
             coords[61*3+1] -= np.random.uniform(0.05, 0.10)
@@ -185,11 +184,11 @@ def generate_landmark_dataset_for_emotions(num_samples=4200):
             for idx in inner_brows:
                 coords[idx*3+1] -= np.random.uniform(0.03, 0.06)
 
-        elif emotion_id == 5: # Sorpresa (Surprise - AU 26: Mandíbula baja +Y bastante, CEJAS SUBEN MUCHO -Y)
+        elif emotion_id == 5: # Sorpresa (Surprise - AU 26: Mandíbula baja +Y bastante, cejas suben en arco -Y)
             for idx in jaw:
                 coords[idx*3+1] += np.random.uniform(0.12, 0.35)
             for idx in brows:
-                coords[idx*3+1] -= np.random.uniform(0.08, 0.16)
+                coords[idx*3+1] -= np.random.uniform(0.05, 0.10)
 
         else:                 # Neutral
             pass
@@ -244,52 +243,56 @@ def extract_facs_action_units(coords):
     de la malla de 468 puntos de MediaPipe (1404 coordenadas).
     """
     pts = coords.reshape((-1, 3))[:468]
-    eye_dist = np.linalg.norm(pts[33] - pts[263])
-    if eye_dist == 0:
-        eye_dist = 1.0
 
-    # Normalización por escala de ojos
-    pts = pts / eye_dist
-
-    # Cejas (Landmarks 107, 336 interiores; 70, 300 exteriores)
+    # Cejas (107, 336 interiores; 70, 300 exteriores)
     inner_l, inner_r = pts[107], pts[336]
     outer_l, outer_r = pts[70], pts[300]
-    brow_inner_dist = np.linalg.norm(inner_l - inner_r)
+    brow_inner_dist = np.linalg.norm(inner_l[:2] - inner_r[:2])
     brow_slant = ((inner_l[1] - outer_l[1]) + (inner_r[1] - outer_r[1])) / 2.0
+
+    # Elevación vertical de cejas respecto a párpados superiores (159, 386)
+    eye_upper_y = (pts[159, 1] + pts[386, 1]) / 2.0
+    inner_brow_y = (pts[107, 1] + pts[336, 1]) / 2.0
+    inner_brow_lift = eye_upper_y - inner_brow_y
 
     # Comisuras labiales (61 izquierda, 291 derecha) y Labio Superior (13)
     corner_l, corner_r = pts[61], pts[291]
     corners_y = (corner_l[1] + corner_r[1]) / 2.0
     corner_elev = pts[13, 1] - corners_y
 
-    mouth_w = np.linalg.norm(corner_l - corner_r)
-    mouth_h = np.linalg.norm(pts[13] - pts[14])
+    mouth_w = np.linalg.norm(corner_l[:2] - corner_r[:2])
+    mouth_h = np.linalg.norm(pts[13, :2] - pts[14, :2])
 
     scores = np.array([0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.70], dtype=np.float32)
 
     # 0: Ira (Anger), 1: Asco (Disgust), 2: Miedo (Fear), 3: Alegría (Happy), 4: Tristeza (Sad), 5: Sorpresa (Surprise), 6: Neutral
     
-    # 1. Asco (AU9/AU10): El labio superior asciende por encima de las comisuras (corner_elev < -0.03) y arruga la nariz
-    if corner_elev < -0.03:
+    # 1. Miedo (AU 1+2+4+5): Cejas interiores elevadas muy alto hacia la frente (inner_brow_lift > 0.25) sin sonrisa amplia
+    if inner_brow_lift > 0.25 and corner_elev < 0.03:
+        scores[2] += 0.85
+        scores[6] -= 0.50
+
+    # 2. Asco (AU9/AU10): El labio superior asciende marcadamente por encima de las comisuras (corner_elev < -0.08)
+    elif corner_elev < -0.08:
         scores[1] += 0.85
         scores[6] -= 0.50
 
-    # 2. Alegría (AU12): Sonrisa genuina (comisuras elevadas por encima del labio superior)
+    # 3. Alegría (AU12): Sonrisa genuina (comisuras elevadas por encima del labio superior)
     elif corner_elev > 0.038 or (corner_elev > 0.032 and mouth_w > 0.60):
         scores[3] += 0.85
         scores[6] -= 0.50
 
-    # 3. Sorpresa (AU26): Apertura de boca vertical (mandíbula cae) sin sonrisa amplia
-    elif mouth_h > 0.12 and corner_elev <= 0.030:
+    # 4. Sorpresa (AU26): Apertura de boca vertical (mandíbula cae) sin sonrisa amplia ni elevación de miedo
+    elif mouth_h > 0.04 and corner_elev <= 0.030:
         scores[5] += 0.85
         scores[6] -= 0.50
 
-    # 4. Ira (AU4): Ceño fruncido (cejas inclinadas hacia abajo) sin sonrisa ni asco
+    # 5. Ira (AU4): Ceño fruncido (cejas inclinadas hacia abajo) sin sonrisa ni asco ni elevación de miedo
     elif brow_slant < -0.015 and corner_elev <= 0.032:
         scores[0] += 0.85
         scores[6] -= 0.50
 
-    # 5. Tristeza (AU15): Comisuras labiales caídas
+    # 6. Tristeza (AU15): Comisuras labiales caídas
     elif corner_elev < -0.025 and mouth_h < 0.04:
         scores[4] += 0.85
         scores[6] -= 0.50
